@@ -1,0 +1,85 @@
+# Wan2.2 container stack: Redis + CPU API + GPU worker.
+#
+# Prerequisites: NVIDIA Container Toolkit; Docker Compose v2.
+#
+# Usage:
+#   cp docker/compose.env.example .env
+#   # edit .env (WAN_SERVE_API_KEYS; for GPU worker set WAN_CKPT_HOST_PATH to real weights)
+#
+#   docker compose up -d --build redis api
+#   docker compose --profile gpu up -d --build   # includes worker (needs NVIDIA + Toolkit)
+#
+# Logs: docker compose logs -f api
+#       docker compose --profile gpu logs -f worker
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - wan_redis:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    restart: unless-stopped
+    ports:
+      - "${WAN_API_PORT:-8008}:8008"
+    environment:
+      WAN_REDIS_URL: redis://redis:6379/0
+      WAN_SERVE_API_KEYS: ${WAN_SERVE_API_KEYS:?set WAN_SERVE_API_KEYS in .env}
+      WAN_REPO_ROOT: /app
+      WAN_CKPT_DIR: /ckpt
+      WAN_JOB_DIR: /data/jobs
+      WAN_OUTPUT_DIR: /data/outputs
+      WAN_API_HOST: 0.0.0.0
+      WAN_API_PORT: "8008"
+    volumes:
+      - wan_shared:/data
+    depends_on:
+      - redis
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    restart: unless-stopped
+    profiles:
+      - gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      WAN_REDIS_URL: redis://redis:6379/0
+      WAN_SERVE_API_KEYS: ${WAN_SERVE_API_KEYS}
+      WAN_REPO_ROOT: /app
+      WAN_CKPT_DIR: /ckpt
+      WAN_JOB_DIR: /data/jobs
+      WAN_OUTPUT_DIR: /data/outputs
+      WAN_NNODES: ${WAN_NNODES:-1}
+      WAN_NPROC_PER_NODE: ${WAN_NPROC_PER_NODE:-8}
+      WAN_MASTER_ADDR: ${WAN_MASTER_ADDR:-127.0.0.1}
+      WAN_MASTER_PORT: ${WAN_MASTER_PORT:-29500}
+      WAN_RDZV_PREFIX: ${WAN_RDZV_PREFIX:-wan}
+      WAN_SSH_SECOND_NODE: ${WAN_SSH_SECOND_NODE:-}
+      WAN_SSH_TORCHRUN_PREFIX: ${WAN_SSH_TORCHRUN_PREFIX:-cd {repo_root} && export PYTHONPATH={repo_root}:$PYTHONPATH && }
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      # Optional: DashScope prompt extension inside jobs
+      # DASH_API_KEY: ...
+      # DASH_API_URL: ...
+    volumes:
+      - wan_shared:/data
+      - ${WAN_CKPT_HOST_PATH:-./.wan_ckpt_placeholder}:/ckpt:ro
+    depends_on:
+      - redis
+
+volumes:
+  wan_redis:
+  wan_shared:
