@@ -124,36 +124,137 @@ curl -L -o out.mp4 -H "Authorization: Bearer sk-dev" \
 
 ## 5. 双机 2×4 卡 A100（推荐生产形态）
 
-1. **节点 0**：跑 `worker_main`（或单独调度机通过 SSH 触发；默认 worker 在节点 0 本机起 `torchrun`，并对节点 1 执行 SSH）。  
-2. **节点 0 / 1**：`WAN_REPO_ROOT`、`WAN_JOB_DIR`、`WAN_OUTPUT_DIR`、`WAN_CKPT_DIR` 在 NFS 上路径一致。  
-3. **免密 SSH**：节点 0 → 节点 1 建议配置公钥登录；生产环境请将 `serve/launcher.py` 中 `StrictHostKeyChecking=no` 改为受控 known_hosts。  
+下文假设 **GPU 节点 0**（主节点，跑 Worker + 本地 `torchrun`）与 **GPU 节点 1**（从节点，仅通过 SSH 被拉起 `torchrun`）各 **4×A100 40GB**，合计 **8 卡** 跑 `t2v-A14B` / `i2v-A14B` 等需 `WORLD_SIZE=8` 且 `ulysses_size=8` 的任务。`serve/launcher.py` 在 `WAN_NNODES>1` 时会在 **节点 0 本机** 启动 `torchrun`，并通过 **SSH** 在 **节点 1** 启动 **完全相同** 的一条 `torchrun` 命令，由 PyTorch **c10d rendezvous** 完成组网。
+
+### 5.1 拓扑与角色
+
+| 角色 | 建议部署位置 | 说明 |
+|------|----------------|------|
+| **Redis** | 第三台小规格机器、或节点 0、或托管云服务 | API 与 Worker 均需 `WAN_REDIS_URL` 可达。 |
+| **HTTP API** | 任意能访问 Redis 的机器（可无 GPU） | `run_api_server.py`，对客户端暴露 `8008`。 |
+| **GPU Worker** | **仅节点 0 上跑一个进程** | `python -m serve.worker_main`；默认全局 GPU 锁，不要双机各起一个 Worker 消费同一队列。 |
+| **推理进程** | 节点 0：本地 `torchrun`；节点 1：经 SSH 启动的 `torchrun` | 两机 `torchrun` 参数一致，`--rdzv_endpoint` 指向 **节点 0 可达 IP**。 |
+
+### 5.2 网络与主机名
+
+1. 为两机分配固定内网 IP，例如：节点 0 → `10.0.0.10`，节点 1 → `10.0.0.11`。  
+2. `WAN_MASTER_ADDR` 必须填 **节点 0 上对节点 1 可达的 IP**（通常即 `10.0.0.10`），**不要**填 `127.0.0.1`。  
+3. 开放防火墙：**`WAN_MASTER_PORT`（如 29500）** 以及 PyTorch/NCCL 可能使用的端口段（或先临时放宽双机间 TCP 以便联调）。  
+4. 若跨机 RDMA，按机房规范配置 IB；仅用 TCP 时可先设 `export NCCL_IB_DISABLE=1` 排除 IB 干扰（性能会下降，仅用于排障）。
+
+### 5.3 共享存储（NFS 或并行文件系统）
+
+两机对以下路径使用 **同一挂载点、同一绝对路径**（示例均为 `/mnt/wan/...`，可按机房替换）：
+
+| 路径 | 用途 |
+|------|------|
+| `WAN_REPO_ROOT`（如 `/mnt/wan/Wan2.2`） | 本仓库代码，两机一致。 |
+| `WAN_CKPT_DIR`（如 `/mnt/wan/Wan2.2-T2V-A14B`） | 模型权重只读；Worker 内常为 `/ckpt`，宿主机挂载需与 `WAN_CKPT_DIR` 一致。 |
+| `WAN_JOB_DIR` | 任务 JSON；Worker 写入，`job_json` 为 NFS 路径以便两机 `torchrun` 同读。 |
+| `WAN_OUTPUT_DIR` | 生成 MP4；仅 rank 0 写盘，放 NFS 便于 API 机或节点 0 取文件。 |
+
+挂载后分别在两机执行：`ls -la $WAN_REPO_ROOT/generate_job.py` 与 `ls $WAN_CKPT_DIR`，确认路径一致、权限可读。
+
+### 5.4 软件环境（两机必须对齐）
+
+1. **操作系统与驱动**：两机安装同一主线版本 **NVIDIA 驱动**，`nvidia-smi` 正常。  
+2. **Python**：建议 **同版本**（如 3.10/3.11），各自 `venv` 或 **同一套 Conda env** 的克隆亦可，关键是 **`torch` 版本与 CUDA 构建一致**。  
+3. **依赖**：两机均在 `WAN_REPO_ROOT` 下执行 `pip install -r requirements.txt` 与 `pip install -r requirements_serve.txt`（`flash_attn` 若装不上可先跳过，与单机排障相同）。  
+4. **`torchrun` 在 PATH 中**：`which torchrun` 两机均有结果。  
+
+节点 1 **不跑** `serve.worker_main`，但必须能通过 SSH 执行与节点 0 **相同**的 `torchrun … generate_job.py`，因此节点 1 也需完整 Python 环境与仓库代码（与节点 0 同一路径最省事）。
+
+### 5.5 节点 0 → 节点 1 免密 SSH
+
+在 **节点 0** 上（以运行 Worker 的 Linux 用户执行）：
 
 ```bash
-# 两机相同（或通过 systemd 注入）
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519_wan -C "wan-worker"
+# 将公钥追加到节点 1 的 authorized_keys（把 user、10.0.0.11 换成实际值）
+ssh-copy-id -i ~/.ssh/id_ed25519_wan.pub user@10.0.0.11
+# 若使用自定义 key：
+ssh -i ~/.ssh/id_ed25519_wan user@10.0.0.11 'hostname'
+```
+
+`WAN_SSH_SECOND_NODE` 建议写成 **`user@10.0.0.11`**，与上述 `ssh` 登录串一致。  
+生产环境建议在 `serve/launcher.py` 中为 `ssh` 增加 `KnownHostsFile` / 关闭 `StrictHostKeyChecking=no`，避免中间人风险。
+
+### 5.6 NCCL 与常见环境变量（两机 Worker 进程继承；SSH 子进程同理）
+
+在 **节点 0** 启动 Worker 的 shell 或 systemd 中可导出（按网卡名修改）：
+
+```bash
+export NCCL_SOCKET_IFNAME=eth0      # 或 ens、bond0 等，双机互通的网卡
+export NCCL_DEBUG=WARN              # 排障时可改为 INFO
+# export NCCL_IB_DISABLE=1          # 无 IB 或联调时可开
+```
+
+### 5.7 双机专用环境变量（节点 0 上配置）
+
+以下变量在 **跑 `python -m serve.worker_main` 的节点 0** 上设置（可写入 `/etc/default/wan-worker` 或 systemd `Environment=`）：
+
+```bash
 export WAN_NNODES=2
 export WAN_NPROC_PER_NODE=4
-export WAN_MASTER_ADDR=10.0.0.10      # 节点0 内网 IP
+export WAN_MASTER_ADDR=10.0.0.10       # 节点 0 对外的内网 IP
 export WAN_MASTER_PORT=29500
-export WAN_SSH_SECOND_NODE=ubuntu@10.0.0.11
+export WAN_SSH_SECOND_NODE=user@10.0.0.11
+
 export WAN_REPO_ROOT=/mnt/wan/Wan2.2
 export PYTHONPATH=/mnt/wan/Wan2.2:$PYTHONPATH
 export WAN_CKPT_DIR=/mnt/wan/Wan2.2-T2V-A14B
 export WAN_JOB_DIR=/mnt/wan/jobs
 export WAN_OUTPUT_DIR=/mnt/wan/out
+
+export WAN_REDIS_URL=redis://10.0.0.5:6379/0
+export WAN_SERVE_API_KEYS=sk-your-secret
+
+# 可选：保持默认即可；{repo_root} 会替换为 WAN_REPO_ROOT
+# export WAN_SSH_TORCHRUN_PREFIX='cd {repo_root} && export PYTHONPATH={repo_root}:$PYTHONPATH && '
 ```
 
-在 **节点 0** 启动 worker：
+说明：
 
-```bash
-python -m serve.worker_main
-```
+- **`WAN_NNODES` × `WAN_NPROC_PER_NODE` = 8** 时，任务 JSON / API 里 **`ulysses_size` 必须为 8**，且 **`dit_fsdp` / `t5_fsdp`** 与官方多卡示例一致。  
+- **`WAN_MASTER_PORT`** 在每次作业中由 `rdzv_id`（含 `task_id`）区分不同 rendezvous；端口需空闲。  
+- **`WAN_SSH_TORCHRUN_PREFIX`** 中的 **`{repo_root}`** 由程序替换为 `WAN_REPO_ROOT` 的绝对路径（见 `serve/config.py`）。
 
-Worker 会：
+### 5.8 启动顺序（推荐）
 
-1. 在节点 0 执行 `torchrun --nnodes=2 --nproc_per_node=4 … generate_job.py --job_json <共享路径>`；  
-2. 通过 SSH 在节点 1 启动 **同一条** `torchrun` 命令（依赖 PyTorch c10d rendezvous 自动分配 rank）。
+1. **启动 Redis**（若尚未运行）。  
+2. **启动 API**（可在无 GPU 的机器上）：  
+   `export WAN_REDIS_URL=...` 等与队列、路径相关变量后执行 `python run_api_server.py`。  
+3. **仅在节点 0 启动 Worker**：  
+   ```bash
+   cd "$WAN_REPO_ROOT"
+   export PYTHONPATH="$WAN_REPO_ROOT:$PYTHONPATH"
+   python -m serve.worker_main
+   ```  
+4. 用 **curl** 提交一条任务（见上文 §4），观察 Worker 日志：应先出现本地 `torchrun`，约 2 秒后出现 SSH 在节点 1 起的第二条 `torchrun`，最后 rank 0 写 `save_file`。
 
-API 服务可放在任意能访问 Redis 的机器上（不必有 GPU）。
+### 5.9 行为说明（与源码一致）
+
+`serve/launcher.py` 在 `WAN_NNODES>1` 时：
+
+1. 用 `subprocess.Popen` 在 **节点 1** 上执行：  
+   `ssh … user@node1 'bash -lc "<WAN_SSH_TORCHRUN_PREFIX><torchrun 完整命令>"'`  
+2. **约 2 秒** 后在 **节点 0** 上 `subprocess.run` 同样的 `torchrun` 命令。  
+3. 两条命令中的 **`--job_json` 为 NFS 上的同一文件**；**`--rdzv_id` 每次作业唯一**（含 `task_id`），避免与历史进程冲突。
+
+### 5.10 排障清单
+
+| 现象 | 检查项 |
+|------|--------|
+| SSH 失败 | 节点 0 上手动 `ssh user@node1`；`ssh-agent`、私钥权限、`authorized_keys`。 |
+| rendezvous 超时 / 挂住 | `WAN_MASTER_ADDR` 是否可从节点 1 `telnet`/`nc -zv` 到端口；防火墙；两机时钟是否大致同步（建议 NTP）。 |
+| NCCL 报错 | `NCCL_SOCKET_IFNAME`；必要时 `NCCL_IB_DISABLE=1` 试跑。 |
+| 节点 1 找不到模块 | 节点 1 上 `PYTHONPATH` 与 `cd` 是否与 `WAN_SSH_TORCHRUN_PREFIX` 一致；`pip show torch`。 |
+| 仅单机起进程 | `WAN_SSH_SECOND_NODE` 是否为空；`WAN_NNODES` 是否仍为 1。 |
+| OOM / 显存 | 40GB×4 跑 A14B 需 FSDP+Ulysses 与合适 `offload_model` / `convert_model_dtype`，与官方 README 多卡说明一致。 |
+
+### 5.11 与 Docker 的关系
+
+`docker-compose.yml` 默认描述 **单机多卡容器**。双机物理机 + SSH `torchrun` 时，通常做法是：**不在节点 1 上再跑一个消费同一 Redis 队列的 Worker 容器**；仅在 **节点 0** 起 Worker（裸机或单容器），并配置 `WAN_SSH_SECOND_NODE` 指向节点 1 的 **SSH 可达地址**，且两机挂载 **同一 NFS** 到相同路径。若两机都跑在容器内，还需保证 **容器到容器/宿主 SSH**、以及 **容器内 `WAN_MASTER_ADDR` 对另一机可见**（常用 host 网络或显式端口映射，视编排而定）。
 
 ---
 
