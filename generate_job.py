@@ -22,7 +22,7 @@ def main():
         "--job_json",
         type=str,
         required=True,
-        help="Path to JSON job spec (see DEPLOY_SERVE.md).",
+        help="Path to JSON job spec (see README.md).",
     )
     args_ns = parser.parse_args()
     path = Path(args_ns.job_json)
