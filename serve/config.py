@@ -19,7 +19,7 @@ def _i(name: str, default: int) -> int:
 @dataclass(frozen=True)
 class Settings:
     """Runtime configuration (environment variables)."""
-
+    
     redis_url: str
     api_keys: frozenset[str]
     repo_root: str
@@ -41,6 +41,8 @@ class Settings:
     queue_name: str
     task_key_prefix: str
     lock_key: str
+    conda_env: str = "/home/HPCBase/PACKAGE/linlei/miniforge3/envs/wan2.2"           # conda 环境名，如 "mytorch"
+    conda_exe: str = "/home/HPCBase/PACKAGE/linlei/miniforge3/condabin/conda"           # conda 可执行文件路径，为空则用 $CONDA_EXE 或 "conda"
 
     @classmethod
     def from_env(cls) -> "Settings":
