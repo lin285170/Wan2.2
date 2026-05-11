@@ -35,41 +35,31 @@ def _env_for_child(settings: Settings) -> dict:
 
 
 def _build_remote_activate_prefix(settings: Settings) -> str:
-    """
-    构建远程 conda 激活命令前缀。
-    
-    核心要点：
-    1. source conda 的 shell hook（等价于 conda init 做的事）
-    2. conda activate 指定环境
-    3. 必须用 bash -l -i -c 或手动 source，因为非交互式 shell 不会
-       自动 source .bashrc 中的 conda init 内容
-    """
+    """Build the remote shell prefix for conda activation and environment setup."""
     conda_env = settings.conda_env.strip()
     if not conda_env:
         return ""
 
-    # 尝试从当前环境中获取 CONDA_EXE 路径，远程节点通常安装路径一致
     conda_exe = (
         settings.conda_exe.strip()
         or os.environ.get("CONDA_EXE", "")
         or "conda"
     )
 
-    return (
-        f'eval "$({conda_exe} shell.bash hook)" && '
-        f"conda activate {shlex.quote(conda_env)} && "
-        f'export LD_LIBRARY_PATH="/home/HPCBase/compilers/gcc/14.2.0/lib64:$LD_LIBRARY_PATH" && '
-        f'export OMP_NUM_THREADS=1 &&'
-    )
-    # 也可以通过配置指定，见下方 Settings 改动
+    parts = [
+        f'eval "$({conda_exe} shell.bash hook)"',
+        f"conda activate {shlex.quote(conda_env)}",
+    ]
 
-    # eval "$(conda shell.bash hook)" 等价于 conda init 在 .bashrc 中注入的内容
-    # 这样不需要依赖 .bashrc 被 source
-    #activate_cmd = (
-    #    f'eval "$({conda_exe} shell.bash hook)" && '
-    #    f"conda activate {shlex.quote(conda_env)} && "
-    #)
-    #return activate_cmd
+    ld_path = os.environ.get("WAN_REMOTE_LD_LIBRARY_PATH", "").strip()
+    if ld_path:
+        parts.append(f'export LD_LIBRARY_PATH="{ld_path}:$LD_LIBRARY_PATH"')
+
+    omp_threads = os.environ.get("WAN_REMOTE_OMP_NUM_THREADS", "").strip()
+    if omp_threads:
+        parts.append(f"export OMP_NUM_THREADS={shlex.quote(omp_threads)}")
+
+    return " && ".join(parts) + " && "
 
 
 def launch_generate_job(

@@ -41,8 +41,8 @@ class Settings:
     queue_name: str
     task_key_prefix: str
     lock_key: str
-    conda_env: str = "/home/HPCBase/PACKAGE/linlei/miniforge3/envs/wan2.2"           # conda 环境名，如 "mytorch"
-    conda_exe: str = "/home/HPCBase/PACKAGE/linlei/miniforge3/condabin/conda"           # conda 可执行文件路径，为空则用 $CONDA_EXE 或 "conda"
+    conda_env: str = ""
+    conda_exe: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -71,4 +71,6 @@ class Settings:
             queue_name=_b("WAN_QUEUE_NAME", "wan:queue"),
             task_key_prefix=_b("WAN_TASK_KEY_PREFIX", "wan:task:"),
             lock_key=_b("WAN_CLUSTER_LOCK_KEY", "wan:cluster_lock"),
+            conda_env=_b("WAN_CONDA_ENV", ""),
+            conda_exe=_b("WAN_CONDA_EXE", ""),
         )
