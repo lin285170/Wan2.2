@@ -19,7 +19,7 @@ def _i(name: str, default: int) -> int:
 @dataclass(frozen=True)
 class Settings:
     """Runtime configuration (environment variables)."""
-    
+
     redis_url: str
     api_keys: frozenset[str]
     repo_root: str
@@ -29,18 +29,18 @@ class Settings:
     # torchrun / multi-node
     nnodes: int
     nproc_per_node: int
+    node_rank: int
     master_addr: str
     master_port: int
     rdzv_id_prefix: str
-    # SSH second node (optional). Example: user@192.168.1.2
-    ssh_second_node: str
-    ssh_torchrun_prefix: str
     python_bin: str
     torchrun_bin: str
     cluster_lock_ttl_sec: int
     queue_name: str
     task_key_prefix: str
     lock_key: str
+    signal_key: str
+    node_role: str
     conda_env: str = ""
     conda_exe: str = ""
 
@@ -57,20 +57,18 @@ class Settings:
             ckpt_dir=_b("WAN_CKPT_DIR", ""),
             nnodes=_i("WAN_NNODES", 1),
             nproc_per_node=_i("WAN_NPROC_PER_NODE", 1),
+            node_rank=_i("WAN_NODE_RANK", 0),
             master_addr=_b("WAN_MASTER_ADDR", "127.0.0.1"),
             master_port=_i("WAN_MASTER_PORT", 29500),
             rdzv_id_prefix=_b("WAN_RDZV_PREFIX", "wan"),
-            ssh_second_node=_b("WAN_SSH_SECOND_NODE", ""),
-            ssh_torchrun_prefix=_b(
-                "WAN_SSH_TORCHRUN_PREFIX",
-                "cd {repo_root} && export PYTHONPATH={repo_root}:$PYTHONPATH && ",
-            ),
             python_bin=_b("WAN_PYTHON", "python3"),
             torchrun_bin=_b("WAN_TORCHRUN", "torchrun"),
             cluster_lock_ttl_sec=_i("WAN_CLUSTER_LOCK_TTL_SEC", 86400),
             queue_name=_b("WAN_QUEUE_NAME", "wan:queue"),
             task_key_prefix=_b("WAN_TASK_KEY_PREFIX", "wan:task:"),
             lock_key=_b("WAN_CLUSTER_LOCK_KEY", "wan:cluster_lock"),
+            signal_key=_b("WAN_SIGNAL_KEY", "wan:signal"),
+            node_role=_b("WAN_NODE_ROLE", "master"),
             conda_env=_b("WAN_CONDA_ENV", ""),
             conda_exe=_b("WAN_CONDA_EXE", ""),
         )

@@ -16,12 +16,9 @@ logging.basicConfig(
 )
 
 
-def main():
-    settings = Settings.from_env()
-    Path(settings.job_dir).mkdir(parents=True, exist_ok=True)
-    Path(settings.output_dir).mkdir(parents=True, exist_ok=True)
-    store = TaskStore(settings)
-    logging.info("Wan worker started; queue=%s", settings.queue_name)
+def main_master(settings: Settings, store: TaskStore):
+    """Master node: pull tasks from Redis queue, signal worker1 via Redis, run torchrun."""
+    logging.info("Master worker started; queue=%s, nnodes=%d", settings.queue_name, settings.nnodes)
 
     while True:
         task_id = store.brpop_task_id(timeout=10)
@@ -44,6 +41,17 @@ def main():
             job_path = Path(settings.job_dir) / f"{task_id}.json"
             job_path.write_text(json.dumps(job, indent=2), encoding="utf-8")
             rdzv_id = f"{settings.rdzv_id_prefix}-{task_id}"
+
+            # Signal worker1 to join this torchrun job
+            if settings.nnodes > 1:
+                signal = json.dumps({
+                    "task_id": task_id,
+                    "rdzv_id": rdzv_id,
+                    "job": job,
+                })
+                store.publish_signal(signal)
+                logging.info("Published signal for worker1: %s / rdzv_id=%s", task_id, rdzv_id)
+
             rc = launch_generate_job(settings, job_path, rdzv_id)
             out_path = job.get("save_file")
             if rc != 0:
@@ -69,6 +77,47 @@ def main():
             store.update(task_id, status="FAILED", message=str(e))
         finally:
             store.release_cluster_lock()
+
+
+def main_worker(settings: Settings, store: TaskStore):
+    """Worker node (secondary): listen for signal from master, write local job JSON, run torchrun."""
+    logging.info("Worker node started; waiting for signals on %s", settings.signal_key)
+
+    pubsub = store._r.pubsub()
+    pubsub.subscribe(settings.signal_key)
+
+    while True:
+        msg = pubsub.get_message(timeout=10)
+        if msg is None or msg["type"] != "message":
+            continue
+
+        try:
+            signal = json.loads(msg["data"])
+            task_id = signal["task_id"]
+            rdzv_id = signal["rdzv_id"]
+            job = signal["job"]
+            logging.info("Received signal: task=%s, rdzv_id=%s", task_id, rdzv_id)
+
+            # Write job JSON locally so generate_job.py can read it
+            job_path = Path(settings.job_dir) / f"{task_id}.json"
+            job_path.write_text(json.dumps(job, indent=2), encoding="utf-8")
+
+            rc = launch_generate_job(settings, job_path, rdzv_id)
+            logging.info("Worker torchrun for %s finished with rc=%d", task_id, rc)
+        except Exception as e:
+            logging.exception("worker failed processing signal: %s", msg["data"])
+
+
+def main():
+    settings = Settings.from_env()
+    Path(settings.job_dir).mkdir(parents=True, exist_ok=True)
+    Path(settings.output_dir).mkdir(parents=True, exist_ok=True)
+    store = TaskStore(settings)
+
+    if settings.node_role == "master":
+        main_master(settings, store)
+    else:
+        main_worker(settings, store)
 
 
 if __name__ == "__main__":

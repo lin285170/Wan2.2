@@ -1,0 +1,51 @@
+# Wan2.2 Worker Node: Worker1 (4×A100 40GB) — secondary node.
+#
+# This node receives torchrun signals via Redis pub/sub from the master.
+# Both nodes run torchrun locally and rendezvous via NCCL/TCP.
+#
+# Prerequisites: NVIDIA Container Toolkit; Docker Compose v2.
+#
+# Usage:
+#   cp docker/compose.env.example .env
+#   # edit .env — set WAN_SERVE_API_KEYS, WAN_REDIS_URL (master Redis),
+#   #              WAN_CKPT_HOST_PATH, WAN_MASTER_ADDR (master node IP)
+#
+#   docker compose -f docker-compose.worker.yml up -d --build
+#
+# Logs:  docker compose -f docker-compose.worker.yml logs -f worker1
+
+services:
+  worker1:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      WAN_REDIS_URL: ${WAN_REDIS_URL:?set WAN_REDIS_URL to master Redis, e.g. redis://MASTER_IP:6379/0}
+      WAN_SERVE_API_KEYS: ${WAN_SERVE_API_KEYS}
+      WAN_REPO_ROOT: /app
+      WAN_CKPT_DIR: /ckpt
+      WAN_JOB_DIR: /data/jobs
+      WAN_OUTPUT_DIR: /data/outputs
+      WAN_NODE_ROLE: worker
+      WAN_NNODES: ${WAN_NNODES:-2}
+      WAN_NPROC_PER_NODE: ${WAN_NPROC_PER_NODE:-4}
+      WAN_NODE_RANK: 1
+      WAN_MASTER_ADDR: ${WAN_MASTER_ADDR:?set WAN_MASTER_ADDR to master node IP}
+      WAN_MASTER_PORT: ${WAN_MASTER_PORT:-29500}
+      WAN_RDZV_PREFIX: ${WAN_RDZV_PREFIX:-wan}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - wan_shared:/data
+      - ${WAN_CKPT_HOST_PATH:-./.wan_ckpt_placeholder}:/ckpt:ro
+
+volumes:
+  wan_shared:

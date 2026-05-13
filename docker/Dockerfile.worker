@@ -14,9 +14,6 @@ ENV PIP_NO_CACHE_DIR=1 \
 WORKDIR /app
 
 USER root
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-client ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /tmp/requirements.txt
 RUN sed '/^flash_attn$/d' /tmp/requirements.txt > /tmp/requirements.noflash.txt \

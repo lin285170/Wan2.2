@@ -101,3 +101,6 @@ class TaskStore:
 
     def requeue(self, task_id: str) -> None:
         self._r.rpush(self._settings.queue_name, task_id)
+
+    def publish_signal(self, payload: str) -> None:
+        self._r.publish(self._settings.signal_key, payload)
