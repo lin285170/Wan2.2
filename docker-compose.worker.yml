@@ -3,6 +3,9 @@
 # This node receives torchrun signals via Redis pub/sub from the master.
 # Both nodes run torchrun locally and rendezvous via NCCL/TCP.
 #
+# IMPORTANT: worker1 uses network_mode: host so torchrun/NCCL can bind
+# ports directly on the host. Redis is accessed via the master node's IP.
+#
 # Prerequisites: NVIDIA Container Toolkit; Docker Compose v2.
 #
 # Usage:
@@ -20,6 +23,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.worker
     restart: unless-stopped
+    network_mode: host
     deploy:
       resources:
         reservations:
@@ -28,6 +32,7 @@ services:
               count: all
               capabilities: [gpu]
     environment:
+      # Redis on master node — use the master's real IP (not container hostname)
       WAN_REDIS_URL: ${WAN_REDIS_URL:?set WAN_REDIS_URL to master Redis, e.g. redis://MASTER_IP:6379/0}
       WAN_SERVE_API_KEYS: ${WAN_SERVE_API_KEYS}
       WAN_REPO_ROOT: /app
@@ -38,6 +43,7 @@ services:
       WAN_NNODES: ${WAN_NNODES:-2}
       WAN_NPROC_PER_NODE: ${WAN_NPROC_PER_NODE:-4}
       WAN_NODE_RANK: 1
+      # Master node's real IP — both nodes rendezvous here
       WAN_MASTER_ADDR: ${WAN_MASTER_ADDR:?set WAN_MASTER_ADDR to master node IP}
       WAN_MASTER_PORT: ${WAN_MASTER_PORT:-29500}
       WAN_RDZV_PREFIX: ${WAN_RDZV_PREFIX:-wan}

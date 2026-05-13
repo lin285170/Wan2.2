@@ -3,6 +3,10 @@
 # Each node runs its own torchrun locally; NCCL rendezvous connects them.
 # No SSH needed — master signals worker1 via Redis pub/sub.
 #
+# IMPORTANT: worker0 uses network_mode: host so torchrun/NCCL can bind
+# ports directly on the host. Redis and API remain on the default bridge
+# network; worker0 accesses Redis via host.docker.internal or host IP.
+#
 # Prerequisites: NVIDIA Container Toolkit; Docker Compose v2.
 #
 # Usage:
@@ -53,6 +57,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.worker
     restart: unless-stopped
+    network_mode: host
     deploy:
       resources:
         reservations:
@@ -61,7 +66,8 @@ services:
               count: all
               capabilities: [gpu]
     environment:
-      WAN_REDIS_URL: redis://redis:6379/0
+      # Redis is on host; use localhost or the host's real IP
+      WAN_REDIS_URL: ${WAN_REDIS_URL_LOCAL:-redis://127.0.0.1:6379/0}
       WAN_SERVE_API_KEYS: ${WAN_SERVE_API_KEYS}
       WAN_REPO_ROOT: /app
       WAN_CKPT_DIR: /ckpt
@@ -71,7 +77,8 @@ services:
       WAN_NNODES: ${WAN_NNODES:-2}
       WAN_NPROC_PER_NODE: ${WAN_NPROC_PER_NODE:-4}
       WAN_NODE_RANK: 0
-      WAN_MASTER_ADDR: ${WAN_MASTER_ADDR:-0.0.0.0}
+      # With host network, use the host's real IP (not 0.0.0.0)
+      WAN_MASTER_ADDR: ${WAN_MASTER_ADDR:-127.0.0.1}
       WAN_MASTER_PORT: ${WAN_MASTER_PORT:-29500}
       WAN_RDZV_PREFIX: ${WAN_RDZV_PREFIX:-wan}
       NVIDIA_VISIBLE_DEVICES: all
@@ -79,8 +86,6 @@ services:
     volumes:
       - wan_shared:/data
       - ${WAN_CKPT_HOST_PATH:-./.wan_ckpt_placeholder}:/ckpt:ro
-    depends_on:
-      - redis
 
 volumes:
   wan_redis:

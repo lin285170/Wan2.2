@@ -19,6 +19,9 @@
 - **29500** — torchrun NCCL rendezvous 端口
 - **8008** — API HTTP 端口（对外服务）
 
+> **重要**：worker0 和 worker1 使用 `network_mode: host`，torchrun 直接绑定宿主机端口。
+> 这是 PyTorch 分布式训练的标准做法，Docker bridge 网络会导致 NCCL 连接超时。
+
 验证连通性：
 
 ```bash
@@ -67,9 +70,13 @@ WAN_CKPT_HOST_PATH=/data/models
 WAN_NNODES=2
 WAN_NPROC_PER_NODE=4
 
-# 主节点IP（主节点用 0.0.0.0 监听所有接口）
-WAN_MASTER_ADDR=0.0.0.0
+# 主节点真实IP（worker0 使用 host 网络，直接绑定宿主机端口）
+# 必须使用真实IP，不能用 0.0.0.0 或 127.0.0.1
+WAN_MASTER_ADDR=10.0.0.1
 WAN_MASTER_PORT=29500
+
+# worker0 使用 host 网络，通过 localhost 连接 Redis
+WAN_REDIS_URL_LOCAL=redis://127.0.0.1:6379/0
 
 # API 对外端口
 WAN_API_PORT=8008
