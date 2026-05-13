@@ -14,6 +14,7 @@ from .config import Settings
 from .job_build import request_to_job
 from .schemas import (
     HealthResponse,
+    ModelEnum,
     OutputTaskId,
     TaskStatusBody,
     VideoGenerationRequest,
@@ -33,6 +34,43 @@ def get_settings() -> Settings:
 def get_store() -> TaskStore:
     assert _store is not None
     return _store
+
+
+def _validate_model_input(body: VideoGenerationRequest) -> None:
+    """Per-model field validation — return clear 400 errors for missing required inputs."""
+    model = body.model.value
+    inp = body.input
+    params = body.parameters
+
+    if not inp.prompt:
+        raise HTTPException(status_code=400, detail=f"model '{model}' requires input.prompt")
+
+    # i2v-A14B requires image
+    if model == ModelEnum.i2v_a14b.value and not inp.image:
+        raise HTTPException(
+            status_code=400,
+            detail=f"model '{model}' requires input.image",
+        )
+
+    # animate-14B requires video + pose (src_root_path)
+    if model == ModelEnum.animate_14b.value and not inp.video:
+        raise HTTPException(
+            status_code=400,
+            detail=f"model '{model}' requires input.video (reference video path)",
+        )
+
+    # s2v-14B requires image + audio (or enable_tts)
+    if model == ModelEnum.s2v_14b.value:
+        if not inp.image:
+            raise HTTPException(
+                status_code=400,
+                detail=f"model '{model}' requires input.image",
+            )
+        if not inp.audio and not params.enable_tts:
+            raise HTTPException(
+                status_code=400,
+                detail=f"model '{model}' requires input.audio or parameters.enable_tts=true",
+            )
 
 
 @asynccontextmanager
@@ -81,6 +119,9 @@ def create_video_job(
             status_code=400,
             detail="Set WAN_CKPT_DIR or parameters.ckpt_dir",
         )
+
+    _validate_model_input(body)
+
     task_id = f"wan-{uuid.uuid4().hex}"
     request_id = str(uuid.uuid4())
     job = request_to_job(body, task_id=task_id, settings=settings)

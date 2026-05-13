@@ -1,14 +1,24 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
+
+
+class ModelEnum(str, Enum):
+    t2v_a14b = "wan2.2-t2v-a14b"
+    i2v_a14b = "wan2.2-i2v-a14b"
+    ti2v_5b = "wan2.2-ti2v-5b"
+    s2v_14b = "wan2.2-s2v-14b"
+    animate_14b = "wan2.2-animate-14b"
 
 
 class VideoInput(BaseModel):
     prompt: Optional[str] = None
     image: Optional[str] = None
     audio: Optional[str] = None
+    video: Optional[str] = None
 
 
 class VideoParameters(BaseModel):
@@ -32,11 +42,13 @@ class VideoParameters(BaseModel):
     sample_guide_scale: Optional[Union[float, List[float]]] = None
     convert_model_dtype: Optional[bool] = None
     task: Optional[str] = None
-    # animate / s2v / extras
+    # animate extras
     src_root_path: Optional[str] = None
     refert_num: Optional[int] = None
     replace_flag: Optional[bool] = None
     use_relighting_lora: Optional[bool] = None
+    mask: Optional[str] = None
+    # s2v extras
     num_clip: Optional[int] = None
     enable_tts: Optional[bool] = None
     tts_prompt_audio: Optional[str] = None
@@ -48,7 +60,7 @@ class VideoParameters(BaseModel):
 
 
 class VideoGenerationRequest(BaseModel):
-    model: str = Field(..., description="Model id or task key, e.g. wan2.2-t2v-a14b")
+    model: ModelEnum = Field(..., description="Model id, e.g. wan2.2-t2v-a14b")
     input: VideoInput = Field(default_factory=VideoInput)
     parameters: VideoParameters = Field(default_factory=VideoParameters)
 

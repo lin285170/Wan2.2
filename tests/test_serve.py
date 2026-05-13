@@ -176,10 +176,10 @@ class TestJobBuild:
             req = VideoGenerationRequest(model="wan2.2-t2v-a14b")
             job = request_to_job(req, task_id="wan-min", settings=s)
             # Parameters that were None should not appear
-            assert "size" not in job
             assert "frame_num" not in job
             assert "base_seed" not in job
-            # But model, save_file, and ckpt_dir (if global) should be there
+            # size gets a default value when not provided
+            assert job["size"] == "1280*720"
             assert "model" in job
             assert "save_file" in job
         finally:
@@ -366,3 +366,241 @@ class TestSchemas:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ============================================================
+# serve.schemas — ModelEnum
+# ============================================================
+
+
+class TestModelEnum:
+    def test_all_models_defined(self):
+        from serve.schemas import ModelEnum
+        assert len(ModelEnum) == 5
+        assert ModelEnum.t2v_a14b.value == "wan2.2-t2v-a14b"
+        assert ModelEnum.i2v_a14b.value == "wan2.2-i2v-a14b"
+        assert ModelEnum.ti2v_5b.value == "wan2.2-ti2v-5b"
+        assert ModelEnum.s2v_14b.value == "wan2.2-s2v-14b"
+        assert ModelEnum.animate_14b.value == "wan2.2-animate-14b"
+
+    def test_invalid_model_rejected(self):
+        from serve.schemas import VideoGenerationRequest
+        try:
+            VideoGenerationRequest(model="invalid-model")
+            assert False, "Should reject invalid model"
+        except Exception:
+            pass
+
+
+# ============================================================
+# serve.api — per-model validation
+# ============================================================
+
+
+class TestModelValidation:
+    """Test _validate_model_input for each model's required fields."""
+
+    def _make_body(self, model, **input_kwargs):
+        from serve.schemas import VideoGenerationRequest
+        return VideoGenerationRequest(model=model, input=input_kwargs)
+
+    def test_t2v_requires_prompt(self):
+        from serve.api import _validate_model_input
+        from fastapi import HTTPException
+        body = self._make_body("wan2.2-t2v-a14b")
+        try:
+            _validate_model_input(body)
+            assert False, "Should require prompt"
+        except HTTPException as e:
+            assert e.status_code == 400
+
+    def test_t2v_with_prompt_passes(self):
+        from serve.api import _validate_model_input
+        from serve.schemas import VideoGenerationRequest
+        body = VideoGenerationRequest(
+            model="wan2.2-t2v-a14b",
+            input={"prompt": "A cat"},
+        )
+        _validate_model_input(body)  # should not raise
+
+    def test_i2v_requires_image(self):
+        from serve.api import _validate_model_input
+        from fastapi import HTTPException
+        body = self._make_body("wan2.2-i2v-a14b", prompt="A cat")
+        try:
+            _validate_model_input(body)
+            assert False, "Should require image"
+        except HTTPException as e:
+            assert e.status_code == 400
+            assert "image" in e.detail
+
+    def test_i2v_with_image_passes(self):
+        from serve.api import _validate_model_input
+        from serve.schemas import VideoGenerationRequest
+        body = VideoGenerationRequest(
+            model="wan2.2-i2v-a14b",
+            input={"prompt": "A cat", "image": "/path/to/cat.jpg"},
+        )
+        _validate_model_input(body)
+
+    def test_animate_requires_video(self):
+        from serve.api import _validate_model_input
+        from fastapi import HTTPException
+        body = self._make_body("wan2.2-animate-14b", prompt="pose")
+        try:
+            _validate_model_input(body)
+            assert False, "Should require video"
+        except HTTPException as e:
+            assert e.status_code == 400
+            assert "video" in e.detail
+
+    def test_animate_with_video_passes(self):
+        from serve.api import _validate_model_input
+        from serve.schemas import VideoGenerationRequest
+        body = VideoGenerationRequest(
+            model="wan2.2-animate-14b",
+            input={"prompt": "pose", "video": "/path/to/ref.mp4"},
+        )
+        _validate_model_input(body)
+
+    def test_s2v_requires_image(self):
+        from serve.api import _validate_model_input
+        from fastapi import HTTPException
+        body = self._make_body("wan2.2-s2v-14b", prompt="talk", audio="/path/to.wav")
+        try:
+            _validate_model_input(body)
+            assert False, "Should require image"
+        except HTTPException as e:
+            assert e.status_code == 400
+            assert "image" in e.detail
+
+    def test_s2v_requires_audio_or_tts(self):
+        from serve.api import _validate_model_input
+        from serve.schemas import VideoGenerationRequest
+        from fastapi import HTTPException
+        body = VideoGenerationRequest(
+            model="wan2.2-s2v-14b",
+            input={"prompt": "talk", "image": "/path/to/img.jpg"},
+        )
+        try:
+            _validate_model_input(body)
+            assert False, "Should require audio or enable_tts"
+        except HTTPException as e:
+            assert e.status_code == 400
+            assert "audio" in e.detail
+
+    def test_s2v_with_audio_passes(self):
+        from serve.api import _validate_model_input
+        from serve.schemas import VideoGenerationRequest
+        body = VideoGenerationRequest(
+            model="wan2.2-s2v-14b",
+            input={"prompt": "talk", "image": "/path/to/img.jpg", "audio": "/path/to.wav"},
+        )
+        _validate_model_input(body)
+
+    def test_s2v_with_tts_passes(self):
+        from serve.api import _validate_model_input
+        from serve.schemas import VideoGenerationRequest
+        body = VideoGenerationRequest(
+            model="wan2.2-s2v-14b",
+            input={"prompt": "talk", "image": "/path/to/img.jpg"},
+            parameters={"enable_tts": True},
+        )
+        _validate_model_input(body)
+
+    def test_ti2v_with_prompt_passes(self):
+        from serve.api import _validate_model_input
+        from serve.schemas import VideoGenerationRequest
+        # ti2v only requires prompt, image is optional
+        body = VideoGenerationRequest(
+            model="wan2.2-ti2v-5b",
+            input={"prompt": "A cat"},
+        )
+        _validate_model_input(body)
+
+
+# ============================================================
+# serve.job_build — all models
+# ============================================================
+
+
+class TestJobBuildAllModels:
+    def _make_settings(self):
+        from serve.config import Settings
+        env = {"WAN_SERVE_API_KEYS": "sk-test", "WAN_CKPT_DIR": "/ckpt", "WAN_OUTPUT_DIR": "/out"}
+        for k, v in env.items():
+            os.environ[k] = v
+        s = Settings.from_env()
+        for k in env:
+            os.environ.pop(k, None)
+        return s
+
+    def test_t2v_default_size(self):
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings()
+        req = VideoGenerationRequest(
+            model="wan2.2-t2v-a14b",
+            input={"prompt": "A cat"},
+        )
+        job = request_to_job(req, task_id="wan-t2v", settings=s)
+        assert job["size"] == "1280*720"
+
+    def test_i2v_default_size(self):
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings()
+        req = VideoGenerationRequest(
+            model="wan2.2-i2v-a14b",
+            input={"prompt": "A cat", "image": "/img.jpg"},
+        )
+        job = request_to_job(req, task_id="wan-i2v", settings=s)
+        assert job["size"] == "832*480"
+        assert job["image"] == "/img.jpg"
+
+    def test_ti2v_default_size(self):
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings()
+        req = VideoGenerationRequest(
+            model="wan2.2-ti2v-5b",
+            input={"prompt": "A cat"},
+        )
+        job = request_to_job(req, task_id="wan-ti2v", settings=s)
+        assert job["size"] == "1280*704"
+
+    def test_s2v_default_size(self):
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings()
+        req = VideoGenerationRequest(
+            model="wan2.2-s2v-14b",
+            input={"prompt": "talk", "image": "/img.jpg", "audio": "/talk.wav"},
+        )
+        job = request_to_job(req, task_id="wan-s2v", settings=s)
+        assert job["size"] == "832*480"
+        assert job["audio"] == "/talk.wav"
+
+    def test_animate_default_size(self):
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings()
+        req = VideoGenerationRequest(
+            model="wan2.2-animate-14b",
+            input={"prompt": "pose", "video": "/ref.mp4"},
+        )
+        job = request_to_job(req, task_id="wan-ani", settings=s)
+        assert job["size"] == "720*1280"
+        assert job["video"] == "/ref.mp4"
+
+    def test_explicit_size_overrides_default(self):
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings()
+        req = VideoGenerationRequest(
+            model="wan2.2-t2v-a14b",
+            input={"prompt": "A cat"},
+            parameters={"size": "480*832"},
+        )
+        job = request_to_job(req, task_id="wan-exp", settings=s)
+        assert job["size"] == "480*832"
