@@ -51,15 +51,17 @@ cp docker/compose.env.example .env
 # 必填：API 密钥（逗号分隔支持多个）
 WAN_SERVE_API_KEYS=sk-your-secret-key
 
-# 模型权重路径（主机上的绝对路径，会被挂载到容器 /ckpt）
-# 支持以下 5 种模型，按需挂载对应的权重目录：
-#   wan2.2-t2v-a14b    → /data/Wan2.2-T2V-A14B
-#   wan2.2-i2v-a14b    → /data/Wan2.2-I2V-A14B
-#   wan2.2-ti2v-5b     → /data/Wan2.2-TI2V-5B
-#   wan2.2-animate-14b → /data/Wan2.2-Animate-14B
-#   wan2.2-s2v-14b     → /data/Wan2.2-S2V-14B
-# 如果同时部署多种模型，可将多个目录挂载到同一 /ckpt 下，或通过 parameters.ckpt_dir 指定
-WAN_CKPT_HOST_PATH=/data/Wan2.2-T2V-A14B
+# 模型权重父目录（挂载到容器 /ckpt，每个模型在子目录中）
+# 目录结构如下：
+#   /data/models/Wan2.2-T2V-A14B/
+#   /data/models/Wan2.2-I2V-A14B/
+#   /data/models/Wan2.2-TI2V-5B/
+#   /data/models/Wan2.2-Animate-14B/
+#   /data/models/Wan2.2-S2V-14B/
+# 只需要下载你实际使用的模型，其余子目录可以不存在。
+# 请求时根据 model 字段自动定位到对应子目录。
+# 也可以通过 parameters.ckpt_dir 手动指定其他路径。
+WAN_CKPT_HOST_PATH=/data/models
 
 # 双节点拓扑：2节点 × 4GPU = 8 GPU 总计
 WAN_NNODES=2
@@ -122,8 +124,8 @@ cp docker/compose.env.example .env
 # 与主节点保持一致
 WAN_SERVE_API_KEYS=sk-your-secret-key
 
-# 模型权重路径（副节点上的路径，必须与主节点挂载同一模型）
-WAN_CKPT_HOST_PATH=/data/Wan2.2-T2V-A14B
+# 模型权重父目录（副节点上的路径，与主节点相同的目录结构）
+WAN_CKPT_HOST_PATH=/data/models
 
 # 双节点拓扑
 WAN_NNODES=2
@@ -162,13 +164,15 @@ docker compose -f docker-compose.worker.yml logs -f worker1
 
 ### 支持的模型
 
-| 模型 | model 值 | 必填 input 字段 | 默认 size |
-|------|----------|-----------------|-----------|
-| T2V | `wan2.2-t2v-a14b` | prompt | 1280\*720 |
-| I2V | `wan2.2-i2v-a14b` | prompt + image | 832\*480 |
-| TI2V | `wan2.2-ti2v-5b` | prompt（image 可选） | 1280\*704 |
-| Animate | `wan2.2-animate-14b` | prompt + video | 720\*1280 |
-| S2V | `wan2.2-s2v-14b` | prompt + image + audio（或 enable_tts） | 832\*480 |
+| 模型 | model 值 | 必填 input 字段 | 默认 size | 自动 ckpt_dir |
+|------|----------|-----------------|-----------|---------------|
+| T2V | `wan2.2-t2v-a14b` | prompt | 1280\*720 | `/ckpt/Wan2.2-T2V-A14B` |
+| I2V | `wan2.2-i2v-a14b` | prompt + image | 832\*480 | `/ckpt/Wan2.2-I2V-A14B` |
+| TI2V | `wan2.2-ti2v-5b` | prompt（image 可选） | 1280\*704 | `/ckpt/Wan2.2-TI2V-5B` |
+| Animate | `wan2.2-animate-14b` | prompt + video | 720\*1280 | `/ckpt/Wan2.2-Animate-14B` |
+| S2V | `wan2.2-s2v-14b` | prompt + image + audio（或 enable_tts） | 832\*480 | `/ckpt/Wan2.2-S2V-14B` |
+
+> **模型切换说明**：只需在请求的 `model` 字段指定不同的模型 ID，系统会自动定位对应的权重目录。无需重启服务或修改配置。如需自定义权重路径，可通过 `parameters.ckpt_dir` 覆盖。
 
 ### T2V — 文本生成视频
 

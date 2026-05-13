@@ -129,7 +129,7 @@ class TestJobBuild:
             assert job["prompt"] == "A cat"
             assert job["size"] == "832*480"
             assert job["frame_num"] == 81
-            assert job["ckpt_dir"] == "/ckpt"
+            assert job["ckpt_dir"] == "/ckpt/Wan2.2-T2V-A14B"
             assert job["save_file"] == "/out/wan-abc123.mp4"
         finally:
             for k in env:
@@ -604,3 +604,92 @@ class TestJobBuildAllModels:
         )
         job = request_to_job(req, task_id="wan-exp", settings=s)
         assert job["size"] == "480*832"
+
+
+# ============================================================
+# serve.job_build — ckpt_dir auto-mapping
+# ============================================================
+
+
+class TestCkptDirMapping:
+    def _make_settings(self, ckpt_dir="/ckpt"):
+        from serve.config import Settings
+        env = {"WAN_SERVE_API_KEYS": "sk-test", "WAN_CKPT_DIR": ckpt_dir, "WAN_OUTPUT_DIR": "/out"}
+        for k, v in env.items():
+            os.environ[k] = v
+        s = Settings.from_env()
+        for k in env:
+            os.environ.pop(k, None)
+        return s
+
+    def test_t2v_auto_ckpt_dir(self):
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings("/ckpt")
+        req = VideoGenerationRequest(model="wan2.2-t2v-a14b", input={"prompt": "A cat"})
+        job = request_to_job(req, task_id="wan-t2v", settings=s)
+        assert job["ckpt_dir"] == "/ckpt/Wan2.2-T2V-A14B"
+
+    def test_i2v_auto_ckpt_dir(self):
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings("/ckpt")
+        req = VideoGenerationRequest(model="wan2.2-i2v-a14b", input={"prompt": "A cat", "image": "/img.jpg"})
+        job = request_to_job(req, task_id="wan-i2v", settings=s)
+        assert job["ckpt_dir"] == "/ckpt/Wan2.2-I2V-A14B"
+
+    def test_s2v_auto_ckpt_dir(self):
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings("/ckpt")
+        req = VideoGenerationRequest(model="wan2.2-s2v-14b", input={"prompt": "talk", "image": "/img.jpg", "audio": "/a.wav"})
+        job = request_to_job(req, task_id="wan-s2v", settings=s)
+        assert job["ckpt_dir"] == "/ckpt/Wan2.2-S2V-14B"
+
+    def test_animate_auto_ckpt_dir(self):
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings("/ckpt")
+        req = VideoGenerationRequest(model="wan2.2-animate-14b", input={"prompt": "pose", "video": "/ref.mp4"})
+        job = request_to_job(req, task_id="wan-ani", settings=s)
+        assert job["ckpt_dir"] == "/ckpt/Wan2.2-Animate-14B"
+
+    def test_ti2v_auto_ckpt_dir(self):
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings("/ckpt")
+        req = VideoGenerationRequest(model="wan2.2-ti2v-5b", input={"prompt": "A cat"})
+        job = request_to_job(req, task_id="wan-ti2v", settings=s)
+        assert job["ckpt_dir"] == "/ckpt/Wan2.2-TI2V-5B"
+
+    def test_parameters_ckpt_dir_overrides_auto(self):
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings("/ckpt")
+        req = VideoGenerationRequest(
+            model="wan2.2-t2v-a14b",
+            input={"prompt": "A cat"},
+            parameters={"ckpt_dir": "/custom/path"},
+        )
+        job = request_to_job(req, task_id="wan-custom", settings=s)
+        assert job["ckpt_dir"] == "/custom/path"
+
+    def test_no_global_ckpt_dir_no_parameters_ckpt_dir(self):
+        from serve.config import Settings
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        env = {"WAN_SERVE_API_KEYS": "sk-test", "WAN_OUTPUT_DIR": "/out"}
+        for k, v in env.items():
+            os.environ[k] = v
+        # Ensure WAN_CKPT_DIR is not set
+        os.environ.pop("WAN_CKPT_DIR", None)
+        try:
+            s = Settings.from_env()
+            assert s.ckpt_dir == ""
+            req = VideoGenerationRequest(model="wan2.2-t2v-a14b", input={"prompt": "A cat"})
+            job = request_to_job(req, task_id="wan-nockpt", settings=s)
+            # No ckpt_dir set anywhere — it should not appear in job
+            assert "ckpt_dir" not in job
+        finally:
+            for k in env:
+                os.environ.pop(k, None)
