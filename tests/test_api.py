@@ -106,7 +106,69 @@ class TestAuth:
 
 
 # ============================================================
-# Task creation (full flow)
+# Per-model field validation
+# ============================================================
+
+
+class TestModelValidation:
+    def test_i2v_requires_image(self):
+        """POST i2v without image should return 400."""
+        status, data = _request("POST", "/api/v1/video/generation", {
+            "model": "wan2.2-i2v-a14b",
+            "input": {"prompt": "A cat"},
+        })
+        assert status == 400
+        assert "image" in data.get("detail", "")
+
+    def test_i2v_with_image_passes(self):
+        """POST i2v with image should return 200."""
+        status, data = _request("POST", "/api/v1/video/generation", {
+            "model": "wan2.2-i2v-a14b",
+            "input": {"prompt": "A cat", "image": "/ckpt/Wan2.2-I2V-A14B/ref.jpg"},
+        })
+        assert status == 200
+
+    def test_animate_requires_video(self):
+        """POST animate without video should return 400."""
+        status, data = _request("POST", "/api/v1/video/generation", {
+            "model": "wan2.2-animate-14b",
+            "input": {"prompt": "pose"},
+        })
+        assert status == 400
+        assert "video" in data.get("detail", "")
+
+    def test_s2v_requires_image(self):
+        """POST s2v without image should return 400."""
+        status, data = _request("POST", "/api/v1/video/generation", {
+            "model": "wan2.2-s2v-14b",
+            "input": {"prompt": "talk", "audio": "/ckpt/speech.wav"},
+        })
+        assert status == 400
+        assert "image" in data.get("detail", "")
+
+    def test_s2v_requires_audio_or_tts(self):
+        """POST s2v without audio or enable_tts should return 400."""
+        status, data = _request("POST", "/api/v1/video/generation", {
+            "model": "wan2.2-s2v-14b",
+            "input": {"prompt": "talk", "image": "/ckpt/ref.jpg"},
+        })
+        assert status == 400
+        assert "audio" in data.get("detail", "")
+
+    def test_all_models_require_prompt(self):
+        """POST any model without prompt should return 400."""
+        for model in ("wan2.2-t2v-a14b", "wan2.2-i2v-a14b", "wan2.2-ti2v-5b",
+                       "wan2.2-animate-14b", "wan2.2-s2v-14b"):
+            status, data = _request("POST", "/api/v1/video/generation", {
+                "model": model,
+                "input": {},
+            })
+            assert status == 400
+            assert "prompt" in data.get("detail", "")
+
+
+# ============================================================
+# Task creation (all 5 models)
 # ============================================================
 
 
@@ -133,7 +195,7 @@ class TestTaskCreation:
             "model": "wan2.2-i2v-a14b",
             "input": {
                 "prompt": "A cat dancing",
-                "image": "https://example.com/cat.jpg",
+                "image": "/ckpt/Wan2.2-I2V-A14B/ref.jpg",
             },
             "parameters": {
                 "size": "832*480",
@@ -142,16 +204,64 @@ class TestTaskCreation:
         assert status == 200
         assert "task_id" in data["output"]
 
-    def test_create_s2v_task(self):
-        """POST with s2v (speech2video) model and audio input."""
+    def test_create_ti2v_task(self):
+        """POST with ti2v model (prompt only, image optional)."""
+        status, data = _request("POST", "/api/v1/video/generation", {
+            "model": "wan2.2-ti2v-5b",
+            "input": {"prompt": "A dog running in a park"},
+            "parameters": {
+                "size": "1280*704",
+            },
+        })
+        assert status == 200
+        assert "task_id" in data["output"]
+
+    def test_create_animate_task(self):
+        """POST with animate model and video input."""
+        status, data = _request("POST", "/api/v1/video/generation", {
+            "model": "wan2.2-animate-14b",
+            "input": {
+                "prompt": "视频中的人在做动作",
+                "video": "/ckpt/animate_input",
+            },
+            "parameters": {
+                "size": "720*1280",
+                "refert_num": 77,
+            },
+        })
+        assert status == 200
+        assert "task_id" in data["output"]
+
+    def test_create_s2v_task_with_audio(self):
+        """POST with s2v model and audio input."""
         status, data = _request("POST", "/api/v1/video/generation", {
             "model": "wan2.2-s2v-14b",
             "input": {
                 "prompt": "A person talking",
-                "audio": "https://example.com/speech.wav",
+                "image": "/ckpt/Wan2.2-S2V-14B/ref.jpg",
+                "audio": "/ckpt/Wan2.2-S2V-14B/speech.wav",
             },
             "parameters": {
                 "size": "832*480",
+            },
+        })
+        assert status == 200
+        assert "task_id" in data["output"]
+
+    def test_create_s2v_task_with_tts(self):
+        """POST with s2v model using TTS instead of audio file."""
+        status, data = _request("POST", "/api/v1/video/generation", {
+            "model": "wan2.2-s2v-14b",
+            "input": {
+                "prompt": "A person talking",
+                "image": "/ckpt/Wan2.2-S2V-14B/ref.jpg",
+            },
+            "parameters": {
+                "size": "832*480",
+                "enable_tts": True,
+                "tts_prompt_audio": "/ckpt/prompt.wav",
+                "tts_prompt_text": "希望你以后能够做的比我还好呦。",
+                "tts_text": "收到好友从远方寄来的生日礼物。",
             },
         })
         assert status == 200
@@ -163,7 +273,7 @@ class TestTaskCreation:
             "model": "wan2.2-t2v-a14b",
             "input": {"prompt": "A dog running in a park"},
             "parameters": {
-                "size": "1280x720",
+                "size": "1280*720",
                 "frame_num": 81,
                 "sample_steps": 40,
                 "sample_shift": 5.0,
@@ -263,17 +373,17 @@ class TestFileDownload:
 
 
 class TestEdgeCases:
-    def test_empty_prompt(self):
-        """POST with empty prompt — API should still accept (prompt is optional in schema)."""
-        status, data = _request("POST", "/api/v1/video/generation", {
-            "model": "wan2.2-t2v-a14b",
-            "input": {},
-        })
-        assert status == 200
-
     def test_missing_model(self):
         """POST without model field — should return 422 (FastAPI validation)."""
         status, data = _request("POST", "/api/v1/video/generation", {
+            "input": {"prompt": "test"},
+        })
+        assert status == 422
+
+    def test_invalid_model(self):
+        """POST with invalid model name — should return 422."""
+        status, data = _request("POST", "/api/v1/video/generation", {
+            "model": "wan2.2-nonexistent",
             "input": {"prompt": "test"},
         })
         assert status == 422
@@ -283,7 +393,7 @@ class TestEdgeCases:
         status, data = _request("POST", "/api/v1/video/generation", {
             "model": "wan2.2-t2v-a14b",
             "input": {"prompt": "size test"},
-            "parameters": {"size": "999x999"},
+            "parameters": {"size": "999*999"},
         })
         # Whether this succeeds depends on server config; at least shouldn't crash
         assert status in (200, 400)

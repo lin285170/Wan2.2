@@ -591,7 +591,8 @@ class TestJobBuildAllModels:
         )
         job = request_to_job(req, task_id="wan-ani", settings=s)
         assert job["size"] == "720*1280"
-        assert job["video"] == "/ref.mp4"
+        assert job["src_root_path"] == "/ref.mp4"
+        assert "video" not in job
 
     def test_explicit_size_overrides_default(self):
         from serve.job_build import request_to_job
@@ -693,3 +694,48 @@ class TestCkptDirMapping:
         finally:
             for k in env:
                 os.environ.pop(k, None)
+
+
+# ============================================================
+# serve.job_build — video → src_root_path mapping
+# ============================================================
+
+
+class TestVideoMapping:
+    def _make_settings(self):
+        from serve.config import Settings
+        env = {"WAN_SERVE_API_KEYS": "sk-test", "WAN_CKPT_DIR": "/ckpt", "WAN_OUTPUT_DIR": "/out"}
+        for k, v in env.items():
+            os.environ[k] = v
+        s = Settings.from_env()
+        for k in env:
+            os.environ.pop(k, None)
+        return s
+
+    def test_video_maps_to_src_root_path(self):
+        """VideoInput.video should be mapped to src_root_path in the job dict."""
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings()
+        req = VideoGenerationRequest(
+            model="wan2.2-animate-14b",
+            input={"prompt": "pose", "video": "/ckpt/animate_input"},
+        )
+        job = request_to_job(req, task_id="wan-ani", settings=s)
+        assert "src_root_path" in job
+        assert job["src_root_path"] == "/ckpt/animate_input"
+        assert "video" not in job
+
+    def test_explicit_src_root_path_not_overridden(self):
+        """If both video and src_root_path are provided, src_root_path wins."""
+        from serve.job_build import request_to_job
+        from serve.schemas import VideoGenerationRequest
+        s = self._make_settings()
+        req = VideoGenerationRequest(
+            model="wan2.2-animate-14b",
+            input={"prompt": "pose", "video": "/ckpt/video_path"},
+            parameters={"src_root_path": "/ckpt/custom_path"},
+        )
+        job = request_to_job(req, task_id="wan-ani-exp", settings=s)
+        assert job["src_root_path"] == "/ckpt/custom_path"
+        assert "video" not in job

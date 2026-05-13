@@ -35,6 +35,13 @@ def request_to_job(
     job.update(req.input.model_dump(exclude_none=True))
     job.update(req.parameters.model_dump(exclude_none=True))
 
+    # Map VideoInput.video → src_root_path (generate.py uses --src_root_path, not --video)
+    # Always remove "video" from job dict — generate.py doesn't have --video arg
+    if "video" in job:
+        video_val = job.pop("video")
+        if "src_root_path" not in job:
+            job["src_root_path"] = video_val
+
     # ckpt_dir: parameters.ckpt_dir overrides everything,
     # otherwise auto-append model-specific subdirectory to global ckpt_dir
     if job.get("ckpt_dir"):
