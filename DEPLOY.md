@@ -52,6 +52,13 @@ cp docker/compose.env.example .env
 WAN_SERVE_API_KEYS=sk-your-secret-key
 
 # 模型权重路径（主机上的绝对路径，会被挂载到容器 /ckpt）
+# 支持以下 5 种模型，按需挂载对应的权重目录：
+#   wan2.2-t2v-a14b    → /data/Wan2.2-T2V-A14B
+#   wan2.2-i2v-a14b    → /data/Wan2.2-I2V-A14B
+#   wan2.2-ti2v-5b     → /data/Wan2.2-TI2V-5B
+#   wan2.2-animate-14b → /data/Wan2.2-Animate-14B
+#   wan2.2-s2v-14b     → /data/Wan2.2-S2V-14B
+# 如果同时部署多种模型，可将多个目录挂载到同一 /ckpt 下，或通过 parameters.ckpt_dir 指定
 WAN_CKPT_HOST_PATH=/data/Wan2.2-T2V-A14B
 
 # 双节点拓扑：2节点 × 4GPU = 8 GPU 总计
@@ -115,7 +122,7 @@ cp docker/compose.env.example .env
 # 与主节点保持一致
 WAN_SERVE_API_KEYS=sk-your-secret-key
 
-# 模型权重路径（副节点上的路径）
+# 模型权重路径（副节点上的路径，必须与主节点挂载同一模型）
 WAN_CKPT_HOST_PATH=/data/Wan2.2-T2V-A14B
 
 # 双节点拓扑
@@ -153,6 +160,18 @@ docker compose -f docker-compose.worker.yml logs -f worker1
 
 ## 发起视频生成请求
 
+### 支持的模型
+
+| 模型 | model 值 | 必填 input 字段 | 默认 size |
+|------|----------|-----------------|-----------|
+| T2V | `wan2.2-t2v-a14b` | prompt | 1280\*720 |
+| I2V | `wan2.2-i2v-a14b` | prompt + image | 832\*480 |
+| TI2V | `wan2.2-ti2v-5b` | prompt（image 可选） | 1280\*704 |
+| Animate | `wan2.2-animate-14b` | prompt + video | 720\*1280 |
+| S2V | `wan2.2-s2v-14b` | prompt + image + audio（或 enable_tts） | 832\*480 |
+
+### T2V — 文本生成视频
+
 ```bash
 curl -X POST http://10.0.0.1:8008/api/v1/video/generation \
   -H "Authorization: Bearer sk-your-secret-key" \
@@ -160,16 +179,117 @@ curl -X POST http://10.0.0.1:8008/api/v1/video/generation \
   -d '{
     "model": "wan2.2-t2v-a14b",
     "input": {
-      "prompt": "A cat walking on a beach"
+      "prompt": "A cat walking on a beach at sunset"
     },
     "parameters": {
-      "size": "1280x720",
+      "size": "1280*720",
       "frame_num": 81
     }
   }'
 ```
 
-返回：
+### I2V — 图片生成视频
+
+```bash
+curl -X POST http://10.0.0.1:8008/api/v1/video/generation \
+  -H "Authorization: Bearer sk-your-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "wan2.2-i2v-a14b",
+    "input": {
+      "prompt": "A cat dancing on the beach",
+      "image": "/ckpt/ref_image.jpg"
+    },
+    "parameters": {
+      "size": "832*480"
+    }
+  }'
+```
+
+### TI2V — 文本/图片生成视频（5B 轻量模型）
+
+```bash
+curl -X POST http://10.0.0.1:8008/api/v1/video/generation \
+  -H "Authorization: Bearer sk-your-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "wan2.2-ti2v-5b",
+    "input": {
+      "prompt": "A dog running in a park",
+      "image": "/ckpt/ref_image.jpg"
+    },
+    "parameters": {
+      "size": "1280*704"
+    }
+  }'
+```
+
+### Animate — 姿态驱动生成视频
+
+```bash
+curl -X POST http://10.0.0.1:8008/api/v1/video/generation \
+  -H "Authorization: Bearer sk-your-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "wan2.2-animate-14b",
+    "input": {
+      "prompt": "视频中的人在做动作",
+      "video": "/ckpt/ref_video.mp4"
+    },
+    "parameters": {
+      "size": "720*1280",
+      "src_root_path": "/ckpt/animate_input",
+      "refert_num": 77
+    }
+  }'
+```
+
+### S2V — 语音驱动生成视频
+
+使用音频文件：
+
+```bash
+curl -X POST http://10.0.0.1:8008/api/v1/video/generation \
+  -H "Authorization: Bearer sk-your-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "wan2.2-s2v-14b",
+    "input": {
+      "prompt": "A person talking happily",
+      "image": "/ckpt/ref_image.jpg",
+      "audio": "/ckpt/speech.wav"
+    },
+    "parameters": {
+      "size": "832*480"
+    }
+  }'
+```
+
+使用 TTS 合成语音：
+
+```bash
+curl -X POST http://10.0.0.1:8008/api/v1/video/generation \
+  -H "Authorization: Bearer sk-your-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "wan2.2-s2v-14b",
+    "input": {
+      "prompt": "A person talking happily",
+      "image": "/ckpt/ref_image.jpg"
+    },
+    "parameters": {
+      "size": "832*480",
+      "enable_tts": true,
+      "tts_prompt_audio": "/ckpt/prompt_voice.wav",
+      "tts_prompt_text": "希望你以后能够做的比我还好呦。",
+      "tts_text": "收到好友从远方寄来的生日礼物，那份意外的惊喜让我心中充满了甜蜜的快乐。"
+    }
+  }'
+```
+
+### 通用：返回格式
+
+所有请求成功后返回：
 
 ```json
 {
