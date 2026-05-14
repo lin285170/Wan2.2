@@ -55,8 +55,5 @@ services:
       NCCL_IB_DISABLE: "1"
       NCCL_TIMEOUT: ${NCCL_TIMEOUT:-1800}
     volumes:
-      - wan_shared:/data
+      - ${WAN_DATA_HOST_PATH:-./data}:/data
       - ${WAN_CKPT_HOST_PATH:-./.wan_ckpt_placeholder}:/ckpt:ro
-
-volumes:
-  wan_shared:
