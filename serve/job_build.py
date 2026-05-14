@@ -60,4 +60,10 @@ def request_to_job(
     if not job.get("size"):
         job["size"] = _MODEL_DEFAULT_SIZE.get(model, "832*480")
 
+    # Auto-enable memory-saving defaults for A100 40GB / dual-expert models
+    if job.get("offload_model") is None:
+        job["offload_model"] = True
+    if job.get("t5_cpu") is None:
+        job["t5_cpu"] = True
+
     return job
