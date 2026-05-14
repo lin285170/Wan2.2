@@ -189,6 +189,7 @@ class WanPipelineBase:
                 shift=1,
                 use_dynamic_shifting=False)
             scheduler.set_timesteps(sampling_steps, device=self.device, shift=shift)
+            timesteps = scheduler.timesteps
         elif sample_solver == 'dpm++':
             scheduler = FlowDPMSolverMultistepScheduler(
                 num_train_timesteps=self.num_train_timesteps,
