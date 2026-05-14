@@ -57,6 +57,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.worker
     restart: unless-stopped
+    shm_size: "16g"
     network_mode: host
     deploy:
       resources:
