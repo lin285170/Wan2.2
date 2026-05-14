@@ -50,6 +50,10 @@ services:
       WAN_RDZV_PREFIX: ${WAN_RDZV_PREFIX:-wan}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      NCCL_DEBUG: INFO
+      NCCL_SOCKET_IFNAME: ${NCCL_SOCKET_IFNAME:-^docker0,lo}
+      NCCL_IB_DISABLE: "1"
+      NCCL_TIMEOUT: ${NCCL_TIMEOUT:-1800}
     volumes:
       - wan_shared:/data
       - ${WAN_CKPT_HOST_PATH:-./.wan_ckpt_placeholder}:/ckpt:ro
