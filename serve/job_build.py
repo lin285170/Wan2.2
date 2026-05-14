@@ -61,9 +61,17 @@ def request_to_job(
         job["size"] = _MODEL_DEFAULT_SIZE.get(model, "832*480")
 
     # Auto-enable memory-saving defaults for A100 40GB / dual-expert models
-    if job.get("offload_model") is None:
-        job["offload_model"] = True
+    # FSDP shards model across GPUs — incompatible with offload_model
+    # DDP (no FSDP) requires offload_model to fit 14B in 40GB
+    nproc = settings.nproc_per_node
+    nnodes = settings.nnodes
+    world_size = nproc * nnodes
+
+    if job.get("dit_fsdp") is None:
+        job["dit_fsdp"] = True
     if job.get("t5_cpu") is None:
         job["t5_cpu"] = True
+    if job.get("offload_model") is None:
+        job["offload_model"] = False if job.get("dit_fsdp") else True
 
     return job

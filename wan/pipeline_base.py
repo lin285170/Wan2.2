@@ -141,12 +141,15 @@ class WanPipelineBase:
             required, offload = 'low_noise_model', 'high_noise_model'
 
         if offload_model or self.init_on_cpu:
+            from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
             off_model = getattr(self, offload)
             req_model = getattr(self, required)
-            if next(off_model.parameters()).device.type == 'cuda':
-                off_model.to('cpu')
-            if next(req_model.parameters()).device.type == 'cpu':
-                req_model.to(self.device)
+            is_fsdp = isinstance(off_model, FSDP)
+            if not is_fsdp:
+                if next(off_model.parameters()).device.type == 'cuda':
+                    off_model.to('cpu')
+                if next(req_model.parameters()).device.type == 'cpu':
+                    req_model.to(self.device)
 
         return getattr(self, required)
 
