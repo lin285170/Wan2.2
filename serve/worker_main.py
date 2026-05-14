@@ -114,6 +114,9 @@ def main():
     Path(settings.output_dir).mkdir(parents=True, exist_ok=True)
     store = TaskStore(settings)
 
+    # Clear stale cluster lock on startup
+    store.release_cluster_lock()
+
     if settings.node_role == "master":
         main_master(settings, store)
     else:

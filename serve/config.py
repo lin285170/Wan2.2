@@ -63,7 +63,7 @@ class Settings:
             rdzv_id_prefix=_b("WAN_RDZV_PREFIX", "wan"),
             python_bin=_b("WAN_PYTHON", "python3"),
             torchrun_bin=_b("WAN_TORCHRUN", "torchrun"),
-            cluster_lock_ttl_sec=_i("WAN_CLUSTER_LOCK_TTL_SEC", 86400),
+            cluster_lock_ttl_sec=_i("WAN_CLUSTER_LOCK_TTL_SEC", 600),
             queue_name=_b("WAN_QUEUE_NAME", "wan:queue"),
             task_key_prefix=_b("WAN_TASK_KEY_PREFIX", "wan:task:"),
             lock_key=_b("WAN_CLUSTER_LOCK_KEY", "wan:cluster_lock"),
