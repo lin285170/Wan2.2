@@ -16,7 +16,7 @@ from tqdm import tqdm
 from .pipeline_base import WanPipelineBase
 from .distributed.fsdp import shard_model
 from .modules.s2v.model_s2v import WanS2VModel
-from .modules.s2v.audio_encoder import Wav2Vec2Encoder
+from .modules.s2v.audio_encoder import AudioEncoder
 from .modules.vae2_2 import Wan2_2_VAE
 
 
@@ -62,7 +62,7 @@ class WanS2V(WanPipelineBase):
             convert_model_dtype=convert_model_dtype)
 
         # Audio encoder
-        self.audio_encoder = Wav2Vec2Encoder(
+        self.audio_encoder = AudioEncoder(
             checkpoint_path=os.path.join(
                 checkpoint_dir, config.audio_checkpoint),
             device=self.device,
