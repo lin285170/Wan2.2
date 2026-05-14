@@ -103,4 +103,10 @@ class TaskStore:
         self._r.rpush(self._settings.queue_name, task_id)
 
     def publish_signal(self, payload: str) -> None:
-        self._r.publish(self._settings.signal_key, payload)
+        self._r.lpush(self._settings.signal_key, payload)
+
+    def brpop_signal(self, timeout: int = 10) -> Optional[str]:
+        item = self._r.brpop(self._settings.signal_key, timeout=timeout)
+        if not item:
+            return None
+        return item[1]

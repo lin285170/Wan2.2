@@ -83,16 +83,13 @@ def main_worker(settings: Settings, store: TaskStore):
     """Worker node (secondary): listen for signal from master, write local job JSON, run torchrun."""
     logging.info("Worker node started; waiting for signals on %s", settings.signal_key)
 
-    pubsub = store._r.pubsub()
-    pubsub.subscribe(settings.signal_key)
-
     while True:
-        msg = pubsub.get_message(timeout=10)
-        if msg is None or msg["type"] != "message":
+        raw = store.brpop_signal(timeout=10)
+        if not raw:
             continue
 
         try:
-            signal = json.loads(msg["data"])
+            signal = json.loads(raw)
             task_id = signal["task_id"]
             rdzv_id = signal["rdzv_id"]
             job = signal["job"]
@@ -105,7 +102,7 @@ def main_worker(settings: Settings, store: TaskStore):
             rc = launch_generate_job(settings, job_path, rdzv_id)
             logging.info("Worker torchrun for %s finished with rc=%d", task_id, rc)
         except Exception as e:
-            logging.exception("worker failed processing signal: %s", msg["data"])
+            logging.exception("worker failed processing signal: %s", raw)
 
 
 def main():
