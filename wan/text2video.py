@@ -135,8 +135,13 @@ class WanT2V(WanPipelineBase):
                 model = self._prepare_model_for_timestep(t, boundary, offload_model)
                 sample_guide_scale = guide_scale[1] if t.item() >= boundary else guide_scale[0]
 
-                noise_pred_cond = model(latent_model_input, t=timestep, **arg_c)[0]
-                noise_pred_uncond = model(latent_model_input, t=timestep, **arg_null)[0]
+                # Batch CFG: single forward pass with cond + uncond
+                batch_x = [latent_model_input[0], latent_model_input[0]]
+                batch_t = timestep.repeat(2)
+                batch_context = [context[0], context_null[0]]
+                noise_pred_cond, noise_pred_uncond = model(
+                    batch_x, t=batch_t, context=batch_context, seq_len=seq_len)
+
                 noise_pred = noise_pred_uncond + sample_guide_scale * (
                     noise_pred_cond - noise_pred_uncond)
 

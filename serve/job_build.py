@@ -63,15 +63,19 @@ def request_to_job(
     # Auto-enable memory-saving defaults for A100 40GB / dual-expert models
     # FSDP shards model across GPUs — incompatible with offload_model
     # DDP (no FSDP) requires offload_model to fit 14B in 40GB
-    nproc = settings.nproc_per_node
-    nnodes = settings.nnodes
-    world_size = nproc * nnodes
-
     if job.get("dit_fsdp") is None:
         job["dit_fsdp"] = True
     if job.get("t5_cpu") is None:
         job["t5_cpu"] = True
     if job.get("offload_model") is None:
         job["offload_model"] = False if job.get("dit_fsdp") else True
+    if job.get("dit_fsdp") and job.get("convert_model_dtype") is None:
+        job["convert_model_dtype"] = True
+
+    # Speed defaults: DPM++ 20 steps is comparable quality to UniPC 40 steps
+    if job.get("sample_solver") is None:
+        job["sample_solver"] = "dpm++"
+    if job.get("sample_steps") is None:
+        job["sample_steps"] = 20
 
     return job
