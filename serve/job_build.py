@@ -72,6 +72,25 @@ def request_to_job(
     if job.get("dit_fsdp") and job.get("convert_model_dtype") is None:
         job["convert_model_dtype"] = True
 
+    # Auto-enable sequence parallel for high-resolution to avoid OOM
+    # SP splits attention along head dimension, reducing activation memory
+    # Requires: ulysses_size == world_size, num_heads divisible by ulysses_size
+    world_size = settings.nproc_per_node * settings.nnodes
+    size_str = job.get("size", "")
+    w, h = (int(x) for x in size_str.split("*"))
+    is_high_res = w * h > 480 * 832  # pixels above 832*480 need SP
+    if is_high_res and job.get("ulysses_size") is None and world_size > 1:
+        # Check if num_heads is divisible by world_size for the selected model
+        # t2v-A14B/i2v-A14B: 40 heads, ti2v-5B: 24 heads
+        _MODEL_NUM_HEADS = {
+            ModelEnum.t2v_a14b.value: 40,
+            ModelEnum.i2v_a14b.value: 40,
+            ModelEnum.ti2v_5b.value: 24,
+        }
+        num_heads = _MODEL_NUM_HEADS.get(model, 40)
+        if num_heads % world_size == 0:
+            job["ulysses_size"] = world_size
+
     # Speed defaults: DPM++ 20 steps is comparable quality to UniPC 40 steps
     if job.get("sample_solver") is None:
         job["sample_solver"] = "dpm++"
