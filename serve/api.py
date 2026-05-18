@@ -199,10 +199,8 @@ async def upload_file(
     return {"path": str(dest), "filename": unique_name}
 
 
-# WebUI — serve static files and root page
+# WebUI — serve root page
 _static_dir = Path(__file__).parent / "static"
-if _static_dir.is_dir():
-    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -211,3 +209,7 @@ def webui():
     if index.is_file():
         return index.read_text(encoding="utf-8")
     return HTMLResponse("<h1>WebUI not found</h1>", status_code=404)
+
+
+if _static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_static_dir), html=True), name="static")
