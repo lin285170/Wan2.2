@@ -61,7 +61,7 @@ class WanAnimate(WanPipelineBase):
             convert_model_dtype=convert_model_dtype,
         )
 
-        shard_fn = partial(shard_model, device_id=device_id)
+        shard_fn = partial(shard_model, device_id=device_id, use_sp=use_sp)
 
         # Animate-specific encoders
         self.clip = CLIPModel(
