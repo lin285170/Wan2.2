@@ -185,16 +185,25 @@ async def upload_file(
 ):
     """Upload a file (image, audio, video) to the server for use in generation."""
     import shutil
-    upload_dir = Path(settings.output_dir) / "uploads" / category
+    upload_dir = Path(settings.job_dir) / "uploads" / category
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sanitize filename and generate unique name to avoid collisions
-    safe_name = Path(file.filename).name.replace(" ", "_")
-    unique_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
+    # Use only ASCII hex name to avoid encoding issues across containers
+    ext = Path(file.filename).suffix.lower()
+    # Convert webp/heic to jpg for PIL compatibility
+    if ext in (".webp", ".heic", ".heif"):
+        ext = ".jpg"
+    unique_name = f"{uuid.uuid4().hex}{ext}"
     dest = upload_dir / unique_name
 
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    if category == "image" and ext == ".jpg" and Path(file.filename).suffix.lower() in (".webp", ".heic", ".heif"):
+        # Convert webp/heic to jpg via PIL
+        from PIL import Image as PILImage
+        img = PILImage.open(file.file).convert("RGB")
+        img.save(dest, "JPEG", quality=95)
+    else:
+        with open(dest, "wb") as f:
+            shutil.copyfileobj(file.file, f)
 
     return {"path": str(dest), "filename": unique_name}
 
