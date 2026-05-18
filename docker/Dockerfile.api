@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r /app/requirements_serve.txt
 
 COPY serve /app/serve
+COPY wan/configs /app/wan/configs
 COPY run_api_server.py /app/run_api_server.py
 
 ENV PYTHONPATH=/app

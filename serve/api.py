@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from .auth import require_bearer
 from .config import Settings
@@ -170,3 +171,17 @@ def download_task_video(task_id: str, store: TaskStore = Depends(get_store)):
 
 def create_app() -> FastAPI:
     return app
+
+
+# WebUI — serve static files and root page
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def webui():
+    index = _static_dir / "index.html"
+    if index.is_file():
+        return index.read_text(encoding="utf-8")
+    return HTMLResponse("<h1>WebUI not found</h1>", status_code=404)
