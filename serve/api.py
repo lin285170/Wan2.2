@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -46,8 +46,8 @@ def _validate_model_input(body: VideoGenerationRequest) -> None:
     if not inp.prompt:
         raise HTTPException(status_code=400, detail=f"model '{model}' requires input.prompt")
 
-    # i2v-A14B requires image
-    if model == ModelEnum.i2v_a14b.value and not inp.image:
+    # i2v-A14B and ti2v-5B require image
+    if model in (ModelEnum.i2v_a14b.value, ModelEnum.ti2v_5b.value) and not inp.image:
         raise HTTPException(
             status_code=400,
             detail=f"model '{model}' requires input.image",
@@ -171,6 +171,32 @@ def download_task_video(task_id: str, store: TaskStore = Depends(get_store)):
 
 def create_app() -> FastAPI:
     return app
+
+
+# File upload endpoint for WebUI
+@app.post(
+    "/api/v1/files/upload",
+    dependencies=[Depends(_auth_dep)],
+)
+async def upload_file(
+    file: UploadFile = File(...),
+    category: str = Form("general"),
+    settings: Settings = Depends(get_settings),
+):
+    """Upload a file (image, audio, video) to the server for use in generation."""
+    import shutil
+    upload_dir = Path(settings.output_dir) / "uploads" / category
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    # Sanitize filename and generate unique name to avoid collisions
+    safe_name = Path(file.filename).name.replace(" ", "_")
+    unique_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
+    dest = upload_dir / unique_name
+
+    with open(dest, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    return {"path": str(dest), "filename": unique_name}
 
 
 # WebUI — serve static files and root page

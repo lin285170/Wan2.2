@@ -20,12 +20,22 @@ h1 { text-align:center; font-size:1.8em; margin:20px 0 10px; color:#7c6ff7; }
 
 .form-group { margin-bottom:14px; }
 .form-group label { display:block; font-size:0.85em; color:#aaa; margin-bottom:4px; }
-.form-group select, .form-group input, .form-group textarea {
+.form-group select, .form-group input[type="text"], .form-group input[type="number"], .form-group textarea {
   width:100%; background:#12122a; border:1px solid #333; border-radius:6px; padding:10px 12px;
   color:#e0e0e0; font-size:0.95em; transition:border 0.2s;
 }
 .form-group select:focus, .form-group input:focus, .form-group textarea:focus { border-color:#7c6ff7; outline:none; }
 .form-group textarea { resize:vertical; min-height:100px; }
+
+.upload-group { display:flex; gap:8px; align-items:center; }
+.upload-group input[type="text"] { flex:1; }
+.upload-btn { padding:10px 14px; background:#2a2a4e; color:#7c6ff7; border:1px solid #333;
+  border-radius:6px; cursor:pointer; font-size:0.85em; white-space:nowrap; transition:background 0.2s; }
+.upload-btn:hover { background:#3a3a5e; }
+.upload-btn.uploading { color:#4da6ff; }
+.upload-status { font-size:0.8em; color:#4dff88; margin-top:4px; }
+.upload-preview { max-width:100%; max-height:120px; border-radius:6px; margin-top:6px; }
+input[type="file"] { display:none; }
 
 .form-row { display:flex; gap:12px; }
 .form-row .form-group { flex:1; }
@@ -109,13 +119,34 @@ h1 { text-align:center; font-size:1.8em; margin:20px 0 10px; color:#7c6ff7; }
     </div>
 
     <div class="form-group" id="imageGroup" style="display:none">
-      <label>Image Path</label>
-      <input type="text" id="image" placeholder="Path to reference image">
+      <label>Reference Image</label>
+      <div class="upload-group">
+        <input type="text" id="image" placeholder="Server path or upload">
+        <button class="upload-btn" onclick="document.getElementById('imageFile').click()">Upload</button>
+        <input type="file" id="imageFile" accept="image/*" onchange="uploadFile('imageFile','image','image')">
+      </div>
+      <div id="imageStatus" class="upload-status"></div>
+      <img id="imagePreview" class="upload-preview" style="display:none">
     </div>
 
     <div class="form-group" id="audioGroup" style="display:none">
-      <label>Audio Path</label>
-      <input type="text" id="audio" placeholder="Path to audio file">
+      <label>Audio</label>
+      <div class="upload-group">
+        <input type="text" id="audio" placeholder="Server path or upload">
+        <button class="upload-btn" onclick="document.getElementById('audioFile').click()">Upload</button>
+        <input type="file" id="audioFile" accept="audio/*,.wav,.mp3" onchange="uploadFile('audioFile','audio','audio')">
+      </div>
+      <div id="audioStatus" class="upload-status"></div>
+    </div>
+
+    <div class="form-group" id="videoGroup" style="display:none">
+      <label>Reference Video</label>
+      <div class="upload-group">
+        <input type="text" id="video" placeholder="Server path or upload">
+        <button class="upload-btn" onclick="document.getElementById('videoFile').click()">Upload</button>
+        <input type="file" id="videoFile" accept="video/*,.mp4" onchange="uploadFile('videoFile','video','video')">
+      </div>
+      <div id="videoStatus" class="upload-status"></div>
     </div>
 
     <div class="form-row">
@@ -184,23 +215,18 @@ h1 { text-align:center; font-size:1.8em; margin:20px 0 10px; color:#7c6ff7; }
 
 <script>
 const MODELS = {
-  'wan2.2-t2v-a14b':  { sizes: ['832*480','1280*720','720*1280','1920*1080','1080*1920'], needsImage: false, needsAudio: false },
-  'wan2.2-i2v-a14b':  { sizes: ['832*480','1280*720','720*1280','1920*1080','1080*1920'], needsImage: true,  needsAudio: false },
-  'wan2.2-ti2v-5b':   { sizes: ['704*1280','1280*704'], needsImage: false, needsAudio: false },
-  'wan2.2-s2v-14b':   { sizes: ['832*480','1280*720','720*1280','1920*1080','1080*1920','1024*704','704*1024','704*1280','1280*704'], needsImage: true, needsAudio: true },
-  'wan2.2-animate-14b':{ sizes: ['720*1280','1280*720'], needsImage: false, needsAudio: false },
+  'wan2.2-t2v-a14b':   { sizes: ['832*480','1280*720','720*1280','1920*1080','1080*1920'], needsImage: false, needsAudio: false, needsVideo: false },
+  'wan2.2-i2v-a14b':   { sizes: ['832*480','1280*720','720*1280','1920*1080','1080*1920'], needsImage: true,  needsAudio: false, needsVideo: false },
+  'wan2.2-ti2v-5b':    { sizes: ['704*1280','1280*704'],                                   needsImage: true,  needsAudio: false, needsVideo: false },
+  'wan2.2-s2v-14b':    { sizes: ['832*480','1280*720','720*1280','1920*1080','1080*1920','1024*704','704*1024','704*1280','1280*704'], needsImage: true, needsAudio: true, needsVideo: false },
+  'wan2.2-animate-14b': { sizes: ['720*1280','1280*720'],                                  needsImage: false, needsAudio: false, needsVideo: true  },
 };
 
 let pollTimer = null;
 let recentJobs = JSON.parse(localStorage.getItem('wan_jobs') || '[]');
 
-function saveApiKey() {
-  sessionStorage.setItem('wan_api_key', document.getElementById('apiKey').value);
-}
-
-function getApiKey() {
-  return sessionStorage.getItem('wan_api_key') || document.getElementById('apiKey').value;
-}
+function saveApiKey() { sessionStorage.setItem('wan_api_key', document.getElementById('apiKey').value); }
+function getApiKey() { return sessionStorage.getItem('wan_api_key') || document.getElementById('apiKey').value; }
 
 function onModelChange() {
   const model = document.getElementById('model').value;
@@ -214,13 +240,59 @@ function onModelChange() {
   });
   document.getElementById('imageGroup').style.display = info.needsImage ? 'block' : 'none';
   document.getElementById('audioGroup').style.display = info.needsAudio ? 'block' : 'none';
+  document.getElementById('videoGroup').style.display = info.needsVideo ? 'block' : 'none';
 }
 
 function toggleAdvanced() {
-  const toggle = document.querySelector('.adv-toggle');
-  const section = document.getElementById('advSection');
-  toggle.classList.toggle('open');
-  section.classList.toggle('show');
+  document.querySelector('.adv-toggle').classList.toggle('open');
+  document.getElementById('advSection').classList.toggle('show');
+}
+
+async function uploadFile(fileInputId, targetId, category) {
+  const fileInput = document.getElementById(fileInputId);
+  const file = fileInput.files[0];
+  if (!file) return;
+
+  const statusEl = document.getElementById(targetId + 'Status');
+  const btn = fileInput.parentElement.querySelector('.upload-btn');
+  btn.classList.add('uploading');
+  btn.textContent = 'Uploading...';
+  statusEl.textContent = '';
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('category', category);
+
+    const res = await fetch('/api/v1/files/upload', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + getApiKey() },
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      statusEl.textContent = 'Upload failed: ' + (err.detail || res.status);
+      statusEl.style.color = '#ff4d4d';
+      return;
+    }
+    const data = await res.json();
+    document.getElementById(targetId).value = data.path;
+    statusEl.textContent = '✓ Uploaded: ' + file.name;
+    statusEl.style.color = '#4dff88';
+
+    // Show image preview
+    if (category === 'image') {
+      const preview = document.getElementById('imagePreview');
+      preview.src = URL.createObjectURL(file);
+      preview.style.display = 'block';
+    }
+  } catch (e) {
+    statusEl.textContent = 'Upload error: ' + e.message;
+    statusEl.style.color = '#ff4d4d';
+  } finally {
+    btn.classList.remove('uploading');
+    btn.textContent = 'Upload';
+  }
 }
 
 async function submitJob() {
@@ -235,8 +307,9 @@ async function submitJob() {
 
   const body = { model, input: { prompt }, parameters: { size: document.getElementById('size').value, frame_num: parseInt(document.getElementById('frameNum').value) || 81 } };
 
-  if (MODELS[model].needsImage) { const img = document.getElementById('image').value.trim(); if (img) body.input.image = img; }
-  if (MODELS[model].needsAudio) { const aud = document.getElementById('audio').value.trim(); if (aud) body.input.audio = aud; }
+  if (MODELS[model].needsImage) { const v = document.getElementById('image').value.trim(); if (v) body.input.image = v; }
+  if (MODELS[model].needsAudio) { const v = document.getElementById('audio').value.trim(); if (v) body.input.audio = v; }
+  if (MODELS[model].needsVideo) { const v = document.getElementById('video').value.trim(); if (v) body.input.video = v; }
 
   const solver = document.getElementById('solver').value;
   const steps = parseInt(document.getElementById('steps').value);
