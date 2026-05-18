@@ -51,7 +51,7 @@ class WanI2V(WanPipelineBase):
         )
 
         # Dual-expert DiT models
-        shard_fn = partial(shard_model, device_id=device_id, use_sp=use_sp)
+        shard_fn = partial(shard_model, device_id=device_id)
         logging.info(f"Creating WanModel from {checkpoint_dir}")
         self.low_noise_model = WanModel.from_pretrained(
             checkpoint_dir, subfolder=config.low_noise_checkpoint)

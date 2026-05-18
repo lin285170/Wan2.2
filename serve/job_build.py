@@ -67,21 +67,17 @@ def request_to_job(
         job["dit_fsdp"] = True
     if job.get("t5_cpu") is None:
         job["t5_cpu"] = True
-    if job.get("offload_model") is None:
-        job["offload_model"] = False if job.get("dit_fsdp") else True
     if job.get("dit_fsdp") and job.get("convert_model_dtype") is None:
         job["convert_model_dtype"] = True
 
-    # Auto-enable sequence parallel for high-resolution to avoid OOM
-    # SP splits attention along head dimension, reducing activation memory
-    # Requires: ulysses_size == world_size, num_heads divisible by ulysses_size
+    # Auto-enable sequence parallel for high-resolution to reduce activation memory
+    # SP + FSDP FULL_SHARD + offload_model: SP splits activations,
+    # FSDP splits parameters, offload swaps inactive expert to CPU
     world_size = settings.nproc_per_node * settings.nnodes
     size_str = job.get("size", "")
     w, h = (int(x) for x in size_str.split("*"))
-    is_high_res = w * h > 480 * 832  # pixels above 832*480 need SP
+    is_high_res = w * h > 480 * 832  # pixels above 832*480 need SP + offload
     if is_high_res and job.get("ulysses_size") is None and world_size > 1:
-        # Check if num_heads is divisible by world_size for the selected model
-        # t2v-A14B/i2v-A14B: 40 heads, ti2v-5B: 24 heads
         _MODEL_NUM_HEADS = {
             ModelEnum.t2v_a14b.value: 40,
             ModelEnum.i2v_a14b.value: 40,
@@ -90,6 +86,13 @@ def request_to_job(
         num_heads = _MODEL_NUM_HEADS.get(model, 40)
         if num_heads % world_size == 0:
             job["ulysses_size"] = world_size
+            # High-res with SP+FSDP: both experts stay on GPU (FSDP shards params)
+            if job.get("offload_model") is None:
+                job["offload_model"] = False
+    else:
+        # Low-res with FSDP only: no offload needed
+        if job.get("offload_model") is None:
+            job["offload_model"] = False
 
     # Speed defaults: DPM++ 20 steps is comparable quality to UniPC 40 steps
     if job.get("sample_solver") is None:

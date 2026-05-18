@@ -19,16 +19,7 @@ def shard_model(
     sharding_strategy=ShardingStrategy.FULL_SHARD,
     sync_module_states=True,
     use_lora=False,
-    use_sp=False,
 ):
-    # When SP is active, use NO_SHARD (DDP) instead of FULL_SHARD.
-    # SP already splits activations across GPUs, so each GPU needs full
-    # parameters for its slice of the computation. NO_SHARD avoids the
-    # expensive all-gather/reduce-scatter that FSDP FULL_SHARD adds
-    # on top of SP's all_to_all communication.
-    if use_sp:
-        sharding_strategy = ShardingStrategy.NO_SHARD
-
     model = FSDP(
         module=model,
         process_group=process_group,

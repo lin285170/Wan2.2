@@ -49,7 +49,7 @@ class WanTI2V(WanPipelineBase):
         )
 
         # Single-expert DiT model
-        shard_fn = partial(shard_model, device_id=device_id, use_sp=use_sp)
+        shard_fn = partial(shard_model, device_id=device_id)
         logging.info(f"Creating WanModel from {checkpoint_dir}")
         self.model = WanModel.from_pretrained(
             checkpoint_dir, subfolder=config.checkpoint)
